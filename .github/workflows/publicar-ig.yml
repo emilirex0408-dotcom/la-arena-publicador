@@ -1,0 +1,87 @@
+# Publica en Instagram un Reel YA SUBIDO (contenedor de instagram_subir.py preparar) a la hora indicada, sin que la
+# laptop tenga que estar prendida. Lo dispara `python instagram_subir.py programar-todo ...` (o `programar`) desde la
+# laptop. El job espera dentro de GitHub Actions (máximo ~5 h 40 min) y publica. El token vive en el secreto IG_TOKEN.
+# ensayo=true hace todo (espera, lee el token, revisa el contenedor) pero NO llama media_publish.
+name: Publicar Reel a la hora
+run-name: "${{ inputs.ensayo && 'ENSAYO' || 'Publicar' }} ${{ inputs.contenedor }} a las ${{ inputs.hora }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      contenedor:
+        description: "ID del contenedor ya subido (sale en instagram.json)"
+        required: true
+      hora:
+        description: "Cuándo publicar, ISO con zona. Ej. 2026-11-08T19:00:00-06:00"
+        required: true
+      ensayo:
+        description: "Solo revisar, NO publicar"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Esperar la hora
+        env:
+          HORA: ${{ inputs.hora }}
+        run: |
+          objetivo=$(date -d "$HORA" +%s) || { echo "Hora inválida"; exit 1; }
+          falta=$(( objetivo - $(date +%s) ))
+          echo "Faltan $falta s para $HORA"
+          if [ "$falta" -gt 20400 ]; then echo "Es más de 5 h 40 min: dispáralo más tarde"; exit 1; fi
+          if [ "$falta" -gt 0 ]; then sleep "$falta"; fi
+          echo "Hora alcanzada: $(TZ=America/Mexico_City date '+%F %T') CDMX"
+
+      - name: ${{ inputs.ensayo && 'Revisar (ensayo, no publica)' || 'Publicar' }}
+        env:
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+          CONTENEDOR: ${{ inputs.contenedor }}
+          ENSAYO: ${{ inputs.ensayo }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, time, urllib.error, urllib.parse, urllib.request
+          API, IG = "https://graph.facebook.com/v23.0", "17841466084375730"
+          tok, cont = os.environ["IG_TOKEN"].strip(), os.environ["CONTENEDOR"]
+          assert tok, "Falta el secreto IG_TOKEN"
+          assert cont.isdigit(), "contenedor inválido"
+
+          def pedir(metodo, ruta, **datos):
+              datos["access_token"] = tok
+              q = urllib.parse.urlencode(datos)
+              url, cuerpo = (f"{API}/{ruta}?{q}", None) if metodo == "GET" else (f"{API}/{ruta}", q.encode())
+              with urllib.request.urlopen(urllib.request.Request(url, data=cuerpo, method=metodo), timeout=60) as r:
+                  return json.load(r)
+
+          # status_code puede decir FINISHED aunque la subida haya fallado: también se revisa video_status
+          try:
+              e = pedir("GET", cont, fields="status_code,status,video_status")
+          except urllib.error.HTTPError as err:
+              raise SystemExit(f"No se pudo leer el contenedor ({err.code}): {err.read()[:300].decode()}")
+          print("contenedor", cont, e.get("status_code"), "-", e.get("status", ""))
+          print("video_status", json.dumps(e.get("video_status", {})))
+          fallas = [f"{k}: {v}" for k, v in (e.get("video_status") or {}).items()
+                    if isinstance(v, dict) and (v.get("status") == "error" or v.get("errors"))]
+          if e.get("status_code") != "FINISHED" or fallas:
+              raise SystemExit(f"El contenedor no está listo (¿venció a las 24 h?): {fallas or e.get('status')}")
+
+          if os.environ["ENSAYO"] == "true":
+              print("ENSAYO OK: hora alcanzada, token leído del secreto y contenedor FINISHED sin errores. No se publicó nada.")
+              raise SystemExit(0)
+
+          for intento in range(4):
+              try:
+                  m = pedir("POST", f"{IG}/media_publish", creation_id=cont)
+                  break
+              except urllib.error.HTTPError as err:
+                  print("intento", intento + 1, err.code, err.read()[:200].decode())
+                  if err.code < 500 or intento == 3:
+                      raise SystemExit("No se pudo publicar")
+                  time.sleep(20)
+          p = pedir("GET", m["id"], fields="permalink")
+          print("PUBLICADO", m["id"], p.get("permalink"))
+          EOF
