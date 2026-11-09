@@ -58,8 +58,12 @@ jobs:
                   return json.load(r)
 
           # status_code puede decir FINISHED aunque la subida haya fallado: también se revisa video_status
+          # (con video_url, pedir video_status da "Invalid parameter" mientras no termina: se pide sin él)
           try:
-              e = pedir("GET", cont, fields="status_code,status,video_status")
+              try:
+                  e = pedir("GET", cont, fields="status_code,status,video_status")
+              except urllib.error.HTTPError:
+                  e = pedir("GET", cont, fields="status_code,status")
           except urllib.error.HTTPError as err:
               raise SystemExit(f"No se pudo leer el contenedor ({err.code}): {err.read()[:300].decode()}")
           print("contenedor", cont, e.get("status_code"), "-", e.get("status", ""))

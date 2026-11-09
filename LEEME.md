@@ -39,6 +39,9 @@ Por pasos (p. ej. preparar en la noche y disparar al día siguiente): `preparar 
   y subir en pedazos no sirve. Instagram necesita una URL pública: por eso el paso por `la-arena-staging`.
 - **Staging:** el mp4 vive en la rama `video` solo mientras Instagram lo procesa (minutos). Al quedar listo, o si
   falla, el script empuja una rama vacía sin historia. Si ese paso falla avisa: `python instagram_subir.py limpiar`.
+  Con video_url, `video_status` da "Invalid parameter" mientras procesa y luego sale `not_started` en sus fases
+  aunque esté FINISHED: es normal (lo que importa es que no traiga `error`). Probado el 8-nov: Instagram baja el
+  video al crear el contenedor; vaciado a los 10 s, el contenedor igual quedó FINISHED.
   GitHub no acepta archivos de más de 100 MB. Ojo: GitHub guarda un rato los commits borrados por force-push
   (se pueden abrir por su SHA); el video de todos modos se hace público a las 19:00.
 - **Minutos de Actions:** el repo privado gasta los 2,000 min/mes del plan gratis y cada minuto de espera cuenta
